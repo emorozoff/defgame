@@ -13,30 +13,38 @@ const C = {
   GRID_X: 180,
   GRID_Y: 130,
 
-  STARTING_SCRAP: 100,
-  PASSIVE_SCRAP_MS: 6000,
-  PASSIVE_SCRAP: 10,
+  STARTING_SCRAP: 75,
+  PASSIVE_SCRAP_MS: 9000,
+  PASSIVE_SCRAP: 3,
 
   SHOOTER_COST: 50,
   SHOOTER_HP: 100,
-  SHOOTER_FIRE_MS: 900,
-  BULLET_DAMAGE: 25,
+  SHOOTER_FIRE_MS: 1100,
+  BULLET_DAMAGE: 22,
   BULLET_SPEED: 700,
 
   SCAVENGER_COST: 75,
-  SCAVENGER_HP: 80,
-  SCAVENGER_TICK_MS: 5000,
-  SCAVENGER_INCOME: 25,
+  SCAVENGER_HP: 60,
+  SCAVENGER_TICK_MS: 7000,
+  SCAVENGER_INCOME: 20,
 
-  ZOMBIE_HP: 100,
-  ZOMBIE_SPEED: 28,
-  ZOMBIE_DAMAGE: 20,
+  ZOMBIE_HP: 140,
+  ZOMBIE_SPEED: 32,
+  ZOMBIE_DAMAGE: 22,
   ZOMBIE_ATTACK_MS: 800,
-  ZOMBIE_KILL_REWARD: 15,
+  ZOMBIE_KILL_REWARD: 7,
 
-  WAVE_BASE_SPAWN_MS: 5000,
-  WAVE_MIN_SPAWN_MS: 1400,
-  WAVE_RAMP_MS: 25000, // каждые 25с волна ускоряется
+  RUNNER_HP: 55,
+  RUNNER_SPEED: 70,
+  RUNNER_DAMAGE: 16,
+  RUNNER_KILL_REWARD: 9,
+  RUNNER_UNLOCK_MS: 25000,
+  RUNNER_CHANCE: 0.3,
+
+  WAVE_BASE_SPAWN_MS: 3800,
+  WAVE_MIN_SPAWN_MS: 900,
+  WAVE_RAMP_MS: 90000, // полная раскрутка к 90с
+  HORDE_UNLOCK_MS: 60000, // после минуты — пачки
 };
 
 const COLOR = {
@@ -124,7 +132,7 @@ class BootScene extends Phaser.Scene {
     g.generateTexture("scavenger", 80, 80);
     g.clear();
 
-    // Зомби
+    // Зомби обычный
     g.fillStyle(0x000000, 0.25);
     g.fillEllipse(35, 65, 44, 10);
     g.fillStyle(COLOR.ZOMBIE_BODY);
@@ -142,6 +150,24 @@ class BootScene extends Phaser.Scene {
     g.lineTo(44, 44);
     g.strokePath();
     g.generateTexture("zombie", 70, 70);
+    g.clear();
+
+    // Бегун: меньше, светлее, жёлтые глаза
+    g.fillStyle(0x000000, 0.25);
+    g.fillEllipse(28, 54, 36, 8);
+    g.fillStyle(0x9ab86a);
+    g.fillCircle(28, 28, 20);
+    g.lineStyle(2, 0x4d6926);
+    g.strokeCircle(28, 28, 20);
+    g.fillStyle(0xffe14a);
+    g.fillCircle(22, 24, 3);
+    g.fillCircle(34, 24, 3);
+    g.lineStyle(2, 0x4d6926);
+    g.beginPath();
+    g.moveTo(22, 35);
+    g.lineTo(34, 35);
+    g.strokePath();
+    g.generateTexture("zombie-runner", 56, 56);
     g.clear();
 
     // Пуля
@@ -349,6 +375,7 @@ class GameScene extends Phaser.Scene {
       s.hp = C.SHOOTER_HP;
       s.maxHp = C.SHOOTER_HP;
       s.lastShot = 0;
+      this.createHpBar(s, 50, 36);
       this.shooters.push(s);
       this.cellMap[r][c] = s;
     } else {
@@ -358,6 +385,7 @@ class GameScene extends Phaser.Scene {
       s.hp = C.SCAVENGER_HP;
       s.maxHp = C.SCAVENGER_HP;
       s.lastTick = this.time.now;
+      this.createHpBar(s, 50, 36);
       this.scavengers.push(s);
       this.cellMap[r][c] = s;
     }
@@ -369,30 +397,55 @@ class GameScene extends Phaser.Scene {
   scheduleNextSpawn() {
     if (this.gameOver) return;
     const elapsed = this.time.now - this.startTime;
-    // Чем дольше игра идёт — тем чаще спавн.
-    const ratio = Math.min(1, elapsed / (C.WAVE_RAMP_MS * 4));
+    const ratio = Math.min(1, elapsed / C.WAVE_RAMP_MS);
     const delay = Phaser.Math.Linear(
       C.WAVE_BASE_SPAWN_MS,
       C.WAVE_MIN_SPAWN_MS,
       ratio
     );
     this.time.delayedCall(delay, () => {
-      this.spawnZombie();
+      this.spawnTick();
       this.scheduleNextSpawn();
     });
   }
 
-  spawnZombie() {
+  spawnTick() {
     if (this.gameOver) return;
-    const r = Phaser.Math.Between(0, C.ROWS - 1);
+    const elapsed = this.time.now - this.startTime;
+    // Размер пачки растёт со временем.
+    let count = 1;
+    if (elapsed > C.HORDE_UNLOCK_MS && Math.random() < 0.35) count = 2;
+    if (elapsed > C.HORDE_UNLOCK_MS * 2 && Math.random() < 0.25) count = 3;
+    const usedRows = new Set();
+    for (let i = 0; i < count; i++) {
+      let r;
+      let attempts = 0;
+      do {
+        r = Phaser.Math.Between(0, C.ROWS - 1);
+        attempts++;
+      } while (usedRows.has(r) && attempts < 8);
+      usedRows.add(r);
+      this.spawnZombie(r, elapsed);
+    }
+  }
+
+  spawnZombie(row, elapsed) {
+    const isRunner =
+      elapsed > C.RUNNER_UNLOCK_MS && Math.random() < C.RUNNER_CHANCE;
+    const tex = isRunner ? "zombie-runner" : "zombie";
     const x = C.GRID_X + C.COLS * C.CELL + 40;
-    const y = C.GRID_Y + r * C.CELL + C.CELL / 2;
-    const z = this.add.image(x, y, "zombie");
-    z.row = r;
-    z.hp = C.ZOMBIE_HP;
-    z.maxHp = C.ZOMBIE_HP;
+    const y = C.GRID_Y + row * C.CELL + C.CELL / 2;
+    const z = this.add.image(x, y, tex);
+    z.row = row;
+    z.kind = isRunner ? "runner" : "normal";
+    z.hp = isRunner ? C.RUNNER_HP : C.ZOMBIE_HP;
+    z.maxHp = z.hp;
+    z.speed = isRunner ? C.RUNNER_SPEED : C.ZOMBIE_SPEED;
+    z.damage = isRunner ? C.RUNNER_DAMAGE : C.ZOMBIE_DAMAGE;
+    z.reward = isRunner ? C.RUNNER_KILL_REWARD : C.ZOMBIE_KILL_REWARD;
     z.lastAttack = 0;
     z.eatingTarget = null;
+    this.createHpBar(z, isRunner ? 36 : 50, isRunner ? 24 : 30);
     this.zombies.push(z);
   }
 
@@ -447,20 +500,23 @@ class GameScene extends Phaser.Scene {
         z.eatingTarget = blocker;
         if (time - z.lastAttack > C.ZOMBIE_ATTACK_MS) {
           z.lastAttack = time;
-          blocker.hp -= C.ZOMBIE_DAMAGE;
+          blocker.hp -= z.damage;
+          this.updateHpBar(blocker);
           this.flashTint(blocker, 0xff5555);
           if (blocker.hp <= 0) {
             this.cellMap[blocker.row][blocker.col] = null;
             this.removeFromList(this.shooters, blocker);
             this.removeFromList(this.scavengers, blocker);
+            this.destroyHpBar(blocker);
             blocker.destroy();
             z.eatingTarget = null;
           }
         }
       } else {
         z.eatingTarget = null;
-        z.x -= (C.ZOMBIE_SPEED * delta) / 1000;
+        z.x -= (z.speed * delta) / 1000;
       }
+      this.updateHpBar(z);
       // Зомби пересёк левую границу — поражение.
       if (z.x < C.GRID_X - 10) {
         return this.endGame(false);
@@ -491,20 +547,46 @@ class GameScene extends Phaser.Scene {
 
   damageZombie(z, dmg) {
     z.hp -= dmg;
+    this.updateHpBar(z);
     this.flashTint(z, 0xffffff);
     if (z.hp <= 0) {
       this.removeFromList(this.zombies, z);
-      this.spawnFloatText(
-        z.x,
-        z.y - 20,
-        `+${C.ZOMBIE_KILL_REWARD}`,
-        "#ffe680"
-      );
-      this.addScrap(C.ZOMBIE_KILL_REWARD);
+      this.spawnFloatText(z.x, z.y - 20, `+${z.reward}`, "#ffe680");
+      this.addScrap(z.reward);
       this.kills++;
       this.killsText.setText("Убито: " + this.kills);
+      this.destroyHpBar(z);
       z.destroy();
     }
+  }
+
+  createHpBar(obj, width, offsetY) {
+    obj._hpW = width;
+    obj._hpYOff = offsetY;
+    obj._hpBg = this.add
+      .rectangle(obj.x, obj.y + offsetY, width + 2, 6, 0x000000, 0.7)
+      .setOrigin(0.5);
+    obj._hpFg = this.add
+      .rectangle(obj.x - width / 2, obj.y + offsetY, width, 4, 0x55cc55)
+      .setOrigin(0, 0.5);
+  }
+
+  updateHpBar(obj) {
+    if (!obj._hpFg) return;
+    const ratio = Math.max(0, obj.hp / obj.maxHp);
+    obj._hpBg.x = obj.x;
+    obj._hpBg.y = obj.y + obj._hpYOff;
+    obj._hpFg.x = obj.x - obj._hpW / 2;
+    obj._hpFg.y = obj.y + obj._hpYOff;
+    obj._hpFg.width = obj._hpW * ratio;
+    obj._hpFg.fillColor =
+      ratio > 0.5 ? 0x55cc55 : ratio > 0.25 ? 0xeeaa33 : 0xcc4444;
+  }
+
+  destroyHpBar(obj) {
+    if (obj._hpBg) obj._hpBg.destroy();
+    if (obj._hpFg) obj._hpFg.destroy();
+    obj._hpBg = obj._hpFg = null;
   }
 
   // -------------------- Утилиты --------------------
