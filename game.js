@@ -4,7 +4,11 @@
 // Все спрайты рисуются программно через Graphics → generateTexture.
 // =============================================================
 
+// Bump on EVERY change so the user can verify the new build is loaded.
+const VERSION = "0.3.0";
+
 const C = {
+  VERSION,
   W: 1280,
   H: 720,
   COLS: 9,
@@ -282,8 +286,15 @@ class GameScene extends Phaser.Scene {
       color: "#ddd",
     });
     this.add
-      .text(C.W - 20, 18, "1 / 2 — выбрать юнит   |   R — рестарт", {
-        fontSize: "14px",
+      .text(C.W - 20, 12, `v${C.VERSION}`, {
+        fontSize: "18px",
+        fontStyle: "bold",
+        color: "#6cf",
+      })
+      .setOrigin(1, 0);
+    this.add
+      .text(C.W - 20, 38, "1 / 2 — выбрать юнит   |   R — рестарт", {
+        fontSize: "13px",
         color: "#888",
       })
       .setOrigin(1, 0);
